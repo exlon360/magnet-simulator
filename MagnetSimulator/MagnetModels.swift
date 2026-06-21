@@ -287,8 +287,8 @@ final class MagnetSimulatorStore: ObservableObject {
         }
 
         guard
-            let selectedObjectID,
-            let index = objects.firstIndex(where: { $0.id == selectedObjectID })
+            let currentID = selectedObjectID,
+            let index = objects.firstIndex(where: { $0.id == currentID })
         else {
             selectedObjectID = objects.last?.id
             return
@@ -305,8 +305,8 @@ final class MagnetSimulatorStore: ObservableObject {
         }
 
         guard
-            let selectedObjectID,
-            let index = objects.firstIndex(where: { $0.id == selectedObjectID })
+            let currentID = selectedObjectID,
+            let index = objects.firstIndex(where: { $0.id == currentID })
         else {
             selectedObjectID = objects.first?.id
             return
