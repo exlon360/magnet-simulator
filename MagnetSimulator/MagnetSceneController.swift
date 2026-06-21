@@ -184,11 +184,12 @@ struct MagnetSceneView: UIViewRepresentable {
                 MagnetEntity(
                     id: object.id,
                     kind: object.kind,
-                    position: SCNVector3(Float(object.x), verticalOffset(for: object.kind), Float(object.z)),
+                    position: SCNVector3(Float(object.x), verticalOffset(for: object.kind) + Float(object.y), Float(object.z)),
                     yaw: Float(object.yaw),
                     strength: Float(object.kind.baseStrength * snapshot.strength),
                     scale: Float(object.scale),
                     polarity: Float(object.polarity),
+                    airHeight: Float(object.y),
                     rollX: Float(object.rollX),
                     rollZ: Float(object.rollZ),
                     current: Float(snapshot.current),
@@ -203,52 +204,54 @@ struct MagnetSceneView: UIViewRepresentable {
             node.position = entity.position
             node.eulerAngles.y = entity.yaw
             node.scale = SCNVector3(entity.scale, entity.scale, entity.scale)
+            let visualNode = SCNNode()
             if entity.kind.isRollingBody {
-                node.eulerAngles.x = entity.rollX
-                node.eulerAngles.z = entity.rollZ
+                visualNode.eulerAngles.x = entity.rollX
+                visualNode.eulerAngles.z = entity.rollZ
             }
+            node.addChildNode(visualNode)
 
             switch entity.kind {
             case .bar:
-                addBarMagnet(to: node)
+                addBarMagnet(to: visualNode)
             case .horseshoe:
-                addHorseshoeMagnet(to: node)
+                addHorseshoeMagnet(to: visualNode)
             case .ring:
-                addRingMagnet(to: node)
+                addRingMagnet(to: visualNode)
             case .disk:
-                addDiskMagnet(to: node)
+                addDiskMagnet(to: visualNode)
             case .cube:
-                addCubeMagnet(to: node)
+                addCubeMagnet(to: visualNode)
             case .sphere:
-                addSphereMagnet(to: node)
+                addSphereMagnet(to: visualNode)
             case .neodymiumBlock:
-                addNeodymiumBlock(to: node)
+                addNeodymiumBlock(to: visualNode)
             case .solenoid:
-                addSolenoid(to: node, current: entity.current)
+                addSolenoid(to: visualNode, current: entity.current)
             case .electromagnet:
-                addElectromagnet(to: node, current: entity.current)
+                addElectromagnet(to: visualNode, current: entity.current)
             case .halbachArray:
-                addHalbachArray(to: node)
+                addHalbachArray(to: visualNode)
             case .fridgeSheet:
-                addFridgeSheet(to: node)
+                addFridgeSheet(to: visualNode)
             case .compassNeedle:
-                addCompassNeedle(to: node, yaw: 0.0, fieldStrength: entity.strength)
+                addCompassNeedle(to: visualNode, yaw: 0.0, fieldStrength: entity.strength)
             case .ferrofluid:
-                addFerrofluid(to: node, snapshot: snapshot, sources: fieldSources, entity: entity)
+                addFerrofluid(to: visualNode, snapshot: snapshot, sources: fieldSources, entity: entity)
             case .magneticGel:
-                addMagneticGel(to: node, snapshot: snapshot, sources: fieldSources, entity: entity)
+                addMagneticGel(to: visualNode, snapshot: snapshot, sources: fieldSources, entity: entity)
             case .woodStick:
-                addWoodStick(to: node)
+                addWoodStick(to: visualNode)
             case .woodBox:
-                addWoodBox(to: node)
+                addWoodBox(to: visualNode)
             case .steelBox:
-                addSteelBox(to: node)
+                addSteelBox(to: visualNode)
             case .plasticBall:
-                addPlasticBall(to: node)
+                addPlasticBall(to: visualNode)
             case .ramp:
-                addRamp(to: node)
+                addRamp(to: visualNode)
             case .paperClip:
-                addPaperClip(to: node)
+                addPaperClip(to: visualNode)
             }
 
             if entity.isSelected {
@@ -257,6 +260,10 @@ struct MagnetSceneView: UIViewRepresentable {
 
             if snapshot.isPaused == false {
                 applyMotion(to: node, entity: entity, snapshot: snapshot)
+            }
+
+            if entity.airHeight > 0.05 {
+                addAirShadow(to: node, entity: entity)
             }
 
             tagForHitTesting(node, id: entity.id)
@@ -820,6 +827,17 @@ struct MagnetSceneView: UIViewRepresentable {
             root.addChildNode(halo)
         }
 
+        private func addAirShadow(to root: SCNNode, entity: MagnetEntity) {
+            let radius = CGFloat(max(0.28, min(0.82, 0.54 * entity.scale + entity.airHeight * 0.08)))
+            let alpha = CGFloat(max(0.08, 0.26 - entity.airHeight * 0.055))
+            let shadow = SCNCylinder(radius: radius, height: 0.006)
+            shadow.radialSegmentCount = 40
+            shadow.materials = [material(UIColor.black.withAlphaComponent(alpha), roughness: 0.9, alpha: alpha)]
+            let node = SCNNode(geometry: shadow)
+            node.position.y = -verticalOffset(for: entity.kind) - entity.airHeight + 0.012
+            root.addChildNode(node)
+        }
+
         private func applyMotion(to node: SCNNode, entity: MagnetEntity, snapshot: MagnetSceneSnapshot) {
             let speed = Float(snapshot.animationSpeed)
             guard speed > 0.01 else { return }
@@ -1176,6 +1194,7 @@ private struct MagnetEntity: Identifiable {
     let strength: Float
     var scale: Float = 1.0
     var polarity: Float = 1.0
+    var airHeight: Float = 0.0
     var rollX: Float = 0.0
     var rollZ: Float = 0.0
     var current: Float = 0.65

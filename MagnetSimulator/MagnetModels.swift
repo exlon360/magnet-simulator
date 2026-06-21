@@ -192,11 +192,13 @@ struct LabObject: Identifiable, Equatable {
     let id: UUID
     var kind: MagnetKind
     var x: Double
+    var y: Double
     var z: Double
     var yaw: Double
     var scale: Double
     var polarity: Double
     var vx: Double
+    var vy: Double
     var vz: Double
     var rollX: Double
     var rollZ: Double
@@ -205,11 +207,13 @@ struct LabObject: Identifiable, Equatable {
         id: UUID = UUID(),
         kind: MagnetKind,
         x: Double,
+        y: Double = 0.0,
         z: Double,
         yaw: Double = 0.0,
         scale: Double = 1.0,
         polarity: Double = 1.0,
         vx: Double = 0.0,
+        vy: Double = 0.0,
         vz: Double = 0.0,
         rollX: Double = 0.0,
         rollZ: Double = 0.0
@@ -217,11 +221,13 @@ struct LabObject: Identifiable, Equatable {
         self.id = id
         self.kind = kind
         self.x = x
+        self.y = y
         self.z = z
         self.yaw = yaw
         self.scale = scale
         self.polarity = polarity
         self.vx = vx
+        self.vy = vy
         self.vz = vz
         self.rollX = rollX
         self.rollZ = rollZ
@@ -335,8 +341,10 @@ final class MagnetSimulatorStore: ObservableObject {
         draggedObjectID = id
         selectedObjectID = id
         objects[index].x = nextX
+        objects[index].y = 0.0
         objects[index].z = nextZ
         objects[index].vx = clampedVelocity(dx * 22.0)
+        objects[index].vy = 0.0
         objects[index].vz = clampedVelocity(dz * 22.0)
         rollObject(at: index, dx: dx, dz: dz)
         applyMagnetPhysics(anchorID: id)
@@ -344,12 +352,13 @@ final class MagnetSimulatorStore: ObservableObject {
     }
 
     func finishDragObject(id: UUID) {
-        guard objects.contains(where: { $0.id == id }) else {
+        guard let index = objects.firstIndex(where: { $0.id == id }) else {
             return
         }
 
         draggedObjectID = nil
         selectedObjectID = id
+        applyFlickLaunch(at: index)
         applyMagnetPhysics(anchorID: nil)
         resolveCollisions(anchorID: nil)
     }
@@ -453,32 +462,58 @@ final class MagnetSimulatorStore: ObservableObject {
             }
 
             if object.kind == .ramp {
+                nextObjects[index].y = 0.0
                 nextObjects[index].vx = 0.0
+                nextObjects[index].vy = 0.0
                 nextObjects[index].vz = 0.0
                 continue
             }
 
             let acceleration = physicsAcceleration(for: object, in: previousObjects)
-            var nextVX = clampedVelocity((object.vx + acceleration.x * dt) * dampingFactor(for: object))
-            var nextVZ = clampedVelocity((object.vz + acceleration.z * dt) * dampingFactor(for: object))
+            let wasAirborne = object.y > 0.001 || abs(object.vy) > 0.001
+            let damping = wasAirborne ? airDampingFactor(for: object) : dampingFactor(for: object)
+            var nextVX = clampedVelocity((object.vx + acceleration.x * dt) * damping)
+            var nextVY = clampedVerticalVelocity(object.vy + verticalAcceleration(for: object, in: previousObjects) * dt)
+            var nextVZ = clampedVelocity((object.vz + acceleration.z * dt) * damping)
+
+            if object.y <= 0.02 {
+                nextVY = max(nextVY, rampLaunchVelocity(for: object, in: previousObjects))
+            }
+
             if abs(nextVX) < 0.012 { nextVX = 0.0 }
+            if abs(nextVY) < 0.012 { nextVY = 0.0 }
             if abs(nextVZ) < 0.012 { nextVZ = 0.0 }
 
             let unclampedX = object.x + nextVX * dt
+            let unclampedY = object.y + nextVY * dt
             let unclampedZ = object.z + nextVZ * dt
             let nextX = clampedX(unclampedX)
+            var nextY = max(0.0, min(3.2, unclampedY))
             let nextZ = clampedZ(unclampedZ)
 
             if nextX != unclampedX {
                 nextVX *= -boundaryRestitution(for: object)
+            }
+            if unclampedY <= 0.0 {
+                let bounce = boundaryRestitution(for: object)
+                if abs(nextVY) > 0.72 {
+                    nextVY = -nextVY * bounce
+                } else {
+                    nextVY = 0.0
+                }
+                nextY = 0.0
+            } else if unclampedY > 3.2 {
+                nextVY = min(0.0, -abs(nextVY) * 0.2)
             }
             if nextZ != unclampedZ {
                 nextVZ *= -boundaryRestitution(for: object)
             }
 
             nextObjects[index].x = nextX
+            nextObjects[index].y = nextY
             nextObjects[index].z = nextZ
             nextObjects[index].vx = nextVX
+            nextObjects[index].vy = nextVY
             nextObjects[index].vz = nextVZ
 
             if object.kind.isRollingBody {
@@ -584,11 +619,14 @@ final class MagnetSimulatorStore: ObservableObject {
                 let nextZ = clampedZ(target.z + unitZ * movement * interaction.direction)
                 objects[targetIndex].x = nextX
                 objects[targetIndex].z = nextZ
+                let contactDistance = collisionRadius(for: source) + collisionRadius(for: target) + 0.04
                 objects[targetIndex].vx = clampedVelocity(objects[targetIndex].vx + (nextX - target.x) * 5.0)
                 objects[targetIndex].vz = clampedVelocity(objects[targetIndex].vz + (nextZ - target.z) * 5.0)
+                if interaction.direction > 0.0, distance < contactDistance + 0.42 {
+                    objects[targetIndex].vy = max(objects[targetIndex].vy, min(3.8, movement * 8.0))
+                }
                 rollObject(at: targetIndex, dx: nextX - target.x, dz: nextZ - target.z)
 
-                let contactDistance = collisionRadius(for: source) + collisionRadius(for: target) + 0.04
                 if interaction.direction < 0.0, distance < contactDistance + 0.36 {
                     snapObject(at: targetIndex, to: source, unitX: unitX, unitZ: unitZ, contactDistance: contactDistance)
                 } else if interaction.direction > 0.0, distance < contactDistance + 0.2 {
@@ -636,8 +674,10 @@ final class MagnetSimulatorStore: ObservableObject {
         contactDistance: Double
     ) {
         objects[index].x = clampedX(source.x + unitX * contactDistance)
+        objects[index].y = max(0.0, objects[index].y)
         objects[index].z = clampedZ(source.z + unitZ * contactDistance)
         objects[index].vx *= 0.35
+        objects[index].vy *= 0.55
         objects[index].vz *= 0.35
 
         if objects[index].kind.isFieldSource {
@@ -677,7 +717,7 @@ final class MagnetSimulatorStore: ObservableObject {
     }
 
     private func physicsNeedsTick() -> Bool {
-        if objects.contains(where: { abs($0.vx) > 0.012 || abs($0.vz) > 0.012 }) {
+        if objects.contains(where: { abs($0.vx) > 0.012 || abs($0.vy) > 0.012 || abs($0.vz) > 0.012 || $0.y > 0.001 }) {
             return true
         }
 
@@ -753,6 +793,35 @@ final class MagnetSimulatorStore: ObservableObject {
         return acceleration
     }
 
+    private func verticalAcceleration(for object: LabObject, in allObjects: [LabObject]) -> Double {
+        guard object.kind != .ramp else {
+            return 0.0
+        }
+
+        var acceleration = -9.6
+
+        if object.kind.isMagneticResponder || object.kind.isFieldSource {
+            let sources = allObjects.filter { $0.kind.isFieldSource && $0.id != object.id }
+            for source in sources {
+                let dx = object.x - source.x
+                let dz = object.z - source.z
+                let distance = max(0.2, hypot(dx, dz))
+                guard distance < 2.6 else { continue }
+
+                let unitX = dx / distance
+                let unitZ = dz / distance
+                let interaction = interactionBetween(source: source, target: object, unitX: unitX, unitZ: unitZ)
+                if interaction.direction > 0.0 {
+                    acceleration += min(8.0, 2.4 * strength * interaction.intensity / max(0.22, distance))
+                } else if object.kind == .paperClip || object.kind == .steelBox {
+                    acceleration += min(2.4, 0.6 * strength / max(0.28, distance))
+                }
+            }
+        }
+
+        return acceleration
+    }
+
     private func magneticAcceleration(from source: LabObject, to target: LabObject) -> (x: Double, z: Double) {
         guard target.kind.isFieldSource || target.kind.isMagneticResponder else {
             return (x: 0.0, z: 0.0)
@@ -805,6 +874,30 @@ final class MagnetSimulatorStore: ObservableObject {
         return (x: 0.0, z: 0.0)
     }
 
+    private func rampLaunchVelocity(for object: LabObject, in allObjects: [LabObject]) -> Double {
+        guard object.kind.isRollingBody else {
+            return 0.0
+        }
+
+        let planarSpeed = hypot(object.vx, object.vz)
+        guard planarSpeed > 1.0 else {
+            return 0.0
+        }
+
+        for ramp in allObjects where ramp.kind == .ramp {
+            let local = localOffset(from: ramp, to: object)
+            let rampScale = max(0.55, ramp.scale)
+            let isNearLip = abs(local.x) < 0.66 * rampScale && local.z < -0.34 * rampScale && local.z > -0.82 * rampScale
+            guard isNearLip else {
+                continue
+            }
+
+            return min(3.6, 0.72 + planarSpeed * 0.34)
+        }
+
+        return 0.0
+    }
+
     private func resolveCollisions(anchorID: UUID?) {
         guard objects.count > 1 else {
             return
@@ -815,6 +908,12 @@ final class MagnetSimulatorStore: ObservableObject {
                 for secondIndex in (firstIndex + 1)..<objects.count {
                     let first = objects[firstIndex]
                     let second = objects[secondIndex]
+                    let verticalGap = abs(second.y - first.y)
+                    let collisionHeight = max(0.38, min(collisionRadius(for: first), collisionRadius(for: second)) * 1.15)
+                    guard verticalGap < collisionHeight else {
+                        continue
+                    }
+
                     let dx = second.x - first.x
                     let dz = second.z - first.z
                     let distance = max(0.001, hypot(dx, dz))
@@ -859,11 +958,13 @@ final class MagnetSimulatorStore: ObservableObject {
 
                     if firstAnchored == false {
                         objects[firstIndex].vx = clampedVelocity(objects[firstIndex].vx - impulse * normalX * firstInverseMass)
+                        objects[firstIndex].vy = max(objects[firstIndex].vy, impactLift(impulse: impulse, object: first))
                         objects[firstIndex].vz = clampedVelocity(objects[firstIndex].vz - impulse * normalZ * firstInverseMass)
                     }
 
                     if secondAnchored == false {
                         objects[secondIndex].vx = clampedVelocity(objects[secondIndex].vx + impulse * normalX * secondInverseMass)
+                        objects[secondIndex].vy = max(objects[secondIndex].vy, impactLift(impulse: impulse, object: second))
                         objects[secondIndex].vz = clampedVelocity(objects[secondIndex].vz + impulse * normalZ * secondInverseMass)
                     }
                 }
@@ -926,6 +1027,7 @@ final class MagnetSimulatorStore: ObservableObject {
             }
 
             objects[index].vx = clampedVelocity(objects[index].vx + kick.x * 0.16)
+            objects[index].vy = max(objects[index].vy, min(3.6, hypot(kick.x, kick.z) * 0.08))
             objects[index].vz = clampedVelocity(objects[index].vz + kick.z * 0.16)
         }
     }
@@ -1013,6 +1115,17 @@ final class MagnetSimulatorStore: ObservableObject {
         }
     }
 
+    private func airDampingFactor(for object: LabObject) -> Double {
+        switch object.kind {
+        case .paperClip, .compassNeedle:
+            return 0.986
+        case .magneticGel, .ferrofluid:
+            return 0.945
+        default:
+            return 0.996
+        }
+    }
+
     private func boundaryRestitution(for object: LabObject) -> Double {
         switch object.kind {
         case .plasticBall, .sphere:
@@ -1026,6 +1139,42 @@ final class MagnetSimulatorStore: ObservableObject {
         }
     }
 
+    private func applyFlickLaunch(at index: Int) {
+        guard objects[index].kind != .ramp else {
+            return
+        }
+
+        let speed = hypot(objects[index].vx, objects[index].vz)
+        guard speed > 1.8 else {
+            return
+        }
+
+        let liftScale: Double
+        switch objects[index].kind {
+        case .plasticBall, .sphere:
+            liftScale = 0.52
+        case .paperClip, .compassNeedle:
+            liftScale = 0.38
+        case .magneticGel, .ferrofluid:
+            liftScale = 0.22
+        case .woodBox, .steelBox:
+            liftScale = 0.24
+        default:
+            liftScale = 0.34
+        }
+
+        objects[index].vy = max(objects[index].vy, min(5.2, (speed - 1.2) * liftScale))
+    }
+
+    private func impactLift(impulse: Double, object: LabObject) -> Double {
+        guard object.kind != .ramp else {
+            return 0.0
+        }
+
+        let lift = impulse / max(0.25, mass(for: object)) * 0.18
+        return min(2.4, max(0.0, lift))
+    }
+
     private func clampedX(_ x: Double) -> Double {
         min(5.4, max(-5.4, x))
     }
@@ -1036,6 +1185,10 @@ final class MagnetSimulatorStore: ObservableObject {
 
     private func clampedVelocity(_ value: Double) -> Double {
         min(8.0, max(-8.0, value))
+    }
+
+    private func clampedVerticalVelocity(_ value: Double) -> Double {
+        min(6.5, max(-9.0, value))
     }
 
     private func wrappedAngle(_ value: Double) -> Double {
