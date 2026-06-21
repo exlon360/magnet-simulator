@@ -1,0 +1,60 @@
+name: Magnet Simulator iOS CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magnet-simulator-ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Magnet Simulator
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: List schemes
+        run: xcodebuild -list -project MagnetSimulator.xcodeproj
+
+      - name: Build for iOS simulator
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/magnet-simulator-ci
+          set +e
+          xcodebuild \
+            -project MagnetSimulator.xcodeproj \
+            -scheme MagnetSimulator \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build/magnet-simulator-ci/xcodebuild.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "${status}" -ne 0 ]]; then
+            echo "::group::xcodebuild diagnostics"
+            grep -Ei "error:|fatal error:|BUILD FAILED|Check dependencies" build/magnet-simulator-ci/xcodebuild.log | tail -80 || true
+            echo "::endgroup::"
+
+            while IFS= read -r line; do
+              escaped="${line//'%'/'%25'}"
+              escaped="${escaped//$'\r'/'%0D'}"
+              escaped="${escaped//$'\n'/'%0A'}"
+              echo "::error title=Xcode build::${escaped}"
+            done < <(grep -Ei "error:|fatal error:|BUILD FAILED|Check dependencies" build/magnet-simulator-ci/xcodebuild.log | tail -20 || true)
+
+            exit "${status}"
+          fi
