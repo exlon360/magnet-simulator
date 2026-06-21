@@ -29,10 +29,13 @@ Magnet Simulator is a SwiftUI and SceneKit iOS app for exploring a 3D magnetic s
 
 - Icon shelf with magnet and object tabs.
 - Tap any tool to drop it on the canvas and select it.
+- Tap or drag objects directly on the 3D canvas.
+- Nearby magnets repel or attract each other, and steel objects, clips, ferrofluid, and magnetic gel pull toward active magnets.
+- Attractive pairs snap to a contact distance when they get close.
 - Big iPad-friendly move pad for arrows, rotate, size, polarity flip, pause, and pulse.
 - Simple motion modes: Still, Wiggle, Spin, and Float.
 - Optional advanced controls for strength, current, gel viscosity, field density, and speed.
-- Field lines, magnetic gel, compass grid, and force-arrow toggles.
+- View menu for field lines, magnetic gel, compass grid, and force-arrow toggles.
 
 ## GitHub IPA Build
 

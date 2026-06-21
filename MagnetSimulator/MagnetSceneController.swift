@@ -4,9 +4,12 @@ import UIKit
 
 struct MagnetSceneView: UIViewRepresentable {
     let snapshot: MagnetSceneSnapshot
+    let onSelectObject: (UUID) -> Void
+    let onDragObject: (UUID, Double, Double) -> Void
+    let onEndDragObject: (UUID) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(onSelectObject: onSelectObject, onDragObject: onDragObject, onEndDragObject: onEndDragObject)
     }
 
     func makeUIView(context: Context) -> SCNView {
@@ -16,12 +19,31 @@ struct MagnetSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
+        context.coordinator.onSelectObject = onSelectObject
+        context.coordinator.onDragObject = onDragObject
+        context.coordinator.onEndDragObject = onEndDragObject
         context.coordinator.render(snapshot, in: uiView)
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         private let scene = SCNScene()
         private var lastSnapshot: MagnetSceneSnapshot?
+        private var draggingObjectID: UUID?
+
+        var onSelectObject: (UUID) -> Void
+        var onDragObject: (UUID, Double, Double) -> Void
+        var onEndDragObject: (UUID) -> Void
+
+        init(
+            onSelectObject: @escaping (UUID) -> Void,
+            onDragObject: @escaping (UUID, Double, Double) -> Void,
+            onEndDragObject: @escaping (UUID) -> Void
+        ) {
+            self.onSelectObject = onSelectObject
+            self.onDragObject = onDragObject
+            self.onEndDragObject = onEndDragObject
+            super.init()
+        }
 
         func configure(_ view: SCNView) {
             view.scene = scene
@@ -30,6 +52,16 @@ struct MagnetSceneView: UIViewRepresentable {
             view.autoenablesDefaultLighting = false
             view.antialiasingMode = .multisampling4X
             view.preferredFramesPerSecond = 60
+
+            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+            tapGesture.delegate = self
+            tapGesture.cancelsTouchesInView = false
+            view.addGestureRecognizer(tapGesture)
+
+            let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            panGesture.delegate = self
+            panGesture.maximumNumberOfTouches = 1
+            view.addGestureRecognizer(panGesture)
         }
 
         func render(_ snapshot: MagnetSceneSnapshot, in view: SCNView) {
@@ -165,7 +197,7 @@ struct MagnetSceneView: UIViewRepresentable {
 
         private func makeNode(for entity: MagnetEntity, snapshot: MagnetSceneSnapshot) -> SCNNode {
             let node = SCNNode()
-            node.name = entity.kind.rawValue
+            node.name = entity.id.uuidString
             node.position = entity.position
             node.eulerAngles.y = entity.yaw
             node.scale = SCNVector3(entity.scale, entity.scale, entity.scale)
@@ -221,7 +253,119 @@ struct MagnetSceneView: UIViewRepresentable {
                 applyMotion(to: node, entity: entity, snapshot: snapshot)
             }
 
+            tagForHitTesting(node, id: entity.id)
             return node
+        }
+
+        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended, let view = gesture.view as? SCNView else {
+                return
+            }
+
+            let location = gesture.location(in: view)
+            guard let objectID = objectID(at: location, in: view) else {
+                return
+            }
+
+            onSelectObject(objectID)
+        }
+
+        @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let view = gesture.view as? SCNView else {
+                return
+            }
+
+            let location = gesture.location(in: view)
+
+            switch gesture.state {
+            case .began:
+                guard let objectID = objectID(at: location, in: view) else {
+                    return
+                }
+
+                draggingObjectID = objectID
+                view.allowsCameraControl = false
+                onSelectObject(objectID)
+                dragObject(objectID, at: location, in: view)
+            case .changed:
+                guard let objectID = draggingObjectID else {
+                    return
+                }
+
+                dragObject(objectID, at: location, in: view)
+            case .ended:
+                if let objectID = draggingObjectID {
+                    onEndDragObject(objectID)
+                }
+                draggingObjectID = nil
+                view.allowsCameraControl = true
+            case .cancelled, .failed:
+                draggingObjectID = nil
+                view.allowsCameraControl = true
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer is UIPanGestureRecognizer, let view = gestureRecognizer.view as? SCNView else {
+                return true
+            }
+
+            let location = gestureRecognizer.location(in: view)
+            return objectID(at: location, in: view) != nil
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        private func dragObject(_ objectID: UUID, at location: CGPoint, in view: SCNView) {
+            guard let floorPoint = floorPoint(at: location, in: view) else {
+                return
+            }
+
+            onDragObject(objectID, Double(floorPoint.x), Double(floorPoint.z))
+        }
+
+        private func objectID(at location: CGPoint, in view: SCNView) -> UUID? {
+            let hits = view.hitTest(location, options: [
+                .searchMode: SCNHitTestSearchMode.closest.rawValue,
+                .ignoreHiddenNodes: true
+            ])
+
+            for hit in hits {
+                var currentNode: SCNNode? = hit.node
+                while let node = currentNode {
+                    if let name = node.name, let objectID = UUID(uuidString: name) {
+                        return objectID
+                    }
+                    currentNode = node.parent
+                }
+            }
+
+            return nil
+        }
+
+        private func floorPoint(at location: CGPoint, in view: SCNView) -> SCNVector3? {
+            let nearPoint = view.unprojectPoint(SCNVector3(Float(location.x), Float(location.y), 0.0))
+            let farPoint = view.unprojectPoint(SCNVector3(Float(location.x), Float(location.y), 1.0))
+            let ray = farPoint - nearPoint
+            guard abs(ray.y) > 0.0001 else {
+                return nil
+            }
+
+            let distanceToFloor = -nearPoint.y / ray.y
+            guard distanceToFloor.isFinite else {
+                return nil
+            }
+
+            return nearPoint + ray * distanceToFloor
+        }
+
+        private func tagForHitTesting(_ node: SCNNode, id: UUID) {
+            node.name = id.uuidString
+            node.childNodes.forEach { tagForHitTesting($0, id: id) }
         }
 
         private func addBarMagnet(to root: SCNNode) {

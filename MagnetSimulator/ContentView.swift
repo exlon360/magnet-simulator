@@ -7,8 +7,13 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            MagnetSceneView(snapshot: store.snapshot)
-                .ignoresSafeArea()
+            MagnetSceneView(
+                snapshot: store.snapshot,
+                onSelectObject: { store.selectObject($0) },
+                onDragObject: { id, x, z in store.dragObject(id: id, x: x, z: z) },
+                onEndDragObject: { store.finishDragObject(id: $0) }
+            )
+            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 topToolbar
@@ -46,7 +51,7 @@ struct ContentView: View {
     private var topToolbar: some View {
         HStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "circle.hexagongrid.circle.fill")
+                Image(systemName: "bolt.circle.fill")
                     .font(.title2.weight(.black))
                     .foregroundStyle(Color.magnetCyan)
                     .frame(width: 42, height: 42)
@@ -78,17 +83,28 @@ struct ContentView: View {
                 }
                 .disabled(store.objects.isEmpty)
 
-                TopIconButton(symbolName: store.showFieldLines ? "point.3.connected.trianglepath.dotted" : "point.3.filled.connected.trianglepath.dotted", tint: .magnetCyan) {
-                    store.showFieldLines.toggle()
-                }
+                Menu {
+                    Toggle(isOn: $store.showFieldLines) {
+                        Label("Field Lines", systemImage: "waveform.path.ecg")
+                    }
 
-                TopIconButton(symbolName: store.showCompasses ? "safari.fill" : "safari", tint: .magnetGold) {
-                    store.showCompasses.toggle()
-                }
+                    Toggle(isOn: $store.showCompasses) {
+                        Label("Compasses", systemImage: "safari")
+                    }
 
-                TopIconButton(symbolName: store.showForces ? "arrow.up.right.circle.fill" : "arrow.up.right.circle", tint: .magnetGreen) {
-                    store.showForces.toggle()
+                    Toggle(isOn: $store.showForces) {
+                        Label("Forces", systemImage: "arrow.up.right.circle")
+                    }
+
+                    Toggle(isOn: $store.showGel) {
+                        Label("Gel", systemImage: "drop.fill")
+                    }
+                } label: {
+                    Image(systemName: "eye.circle.fill")
+                        .font(.headline.weight(.black))
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(LabIconButtonStyle(tint: .magnetCyan))
 
                 TopIconButton(symbolName: "slider.horizontal.3", tint: .magnetViolet) {
                     advancedControlsOpen.toggle()

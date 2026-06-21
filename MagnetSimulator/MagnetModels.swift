@@ -90,6 +90,15 @@ enum MagnetKind: String, CaseIterable, Identifiable {
         }
     }
 
+    var isMagneticResponder: Bool {
+        switch self {
+        case .woodStick, .woodBox, .plasticBall, .ramp:
+            return false
+        default:
+            return true
+        }
+    }
+
     var canFlipPolarity: Bool {
         switch self {
         case .woodStick, .woodBox, .steelBox, .plasticBall, .ramp, .paperClip, .ferrofluid, .magneticGel:
@@ -136,7 +145,7 @@ enum MagnetKind: String, CaseIterable, Identifiable {
         case .steelBox:
             return "archivebox.fill"
         case .plasticBall:
-            return "circle.hexagongrid.fill"
+            return "circle.fill"
         case .ramp:
             return "triangle.fill"
         case .paperClip:
@@ -274,10 +283,39 @@ final class MagnetSimulatorStore: ObservableObject {
         objects.append(object)
         selectedObjectID = object.id
         motionMode = .still
+        applyMagnetPhysics(anchorID: object.id)
     }
 
     func selectTool(_ kind: MagnetKind) {
         add(kind)
+    }
+
+    func selectObject(_ id: UUID) {
+        guard objects.contains(where: { $0.id == id }) else {
+            return
+        }
+
+        selectedObjectID = id
+    }
+
+    func dragObject(id: UUID, x: Double, z: Double) {
+        guard let index = objects.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        selectedObjectID = id
+        objects[index].x = clampedX(x)
+        objects[index].z = clampedZ(z)
+        applyMagnetPhysics(anchorID: id)
+    }
+
+    func finishDragObject(id: UUID) {
+        guard objects.contains(where: { $0.id == id }) else {
+            return
+        }
+
+        selectedObjectID = id
+        applyMagnetPhysics(anchorID: nil)
     }
 
     func selectPrevious() {
@@ -316,36 +354,45 @@ final class MagnetSimulatorStore: ObservableObject {
     }
 
     func nudgeSelected(dx: Double, dz: Double) {
+        let anchorID = selectedObjectID
         updateSelected { object in
-            object.x = min(5.4, max(-5.4, object.x + dx))
-            object.z = min(3.6, max(-3.6, object.z + dz))
+            object.x = clampedX(object.x + dx)
+            object.z = clampedZ(object.z + dz)
         }
+        applyMagnetPhysics(anchorID: anchorID)
     }
 
     func rotateSelected(_ delta: Double) {
+        let anchorID = selectedObjectID
         updateSelected { object in
             object.yaw += delta
         }
+        applyMagnetPhysics(anchorID: anchorID)
     }
 
     func scaleSelected(_ delta: Double) {
+        let anchorID = selectedObjectID
         updateSelected { object in
             object.scale = min(1.9, max(0.55, object.scale + delta))
         }
+        applyMagnetPhysics(anchorID: anchorID)
     }
 
     func reversePolarity() {
+        let anchorID = selectedObjectID
         updateSelected { object in
             if object.kind.canFlipPolarity {
                 object.polarity *= -1.0
             }
         }
+        applyMagnetPhysics(anchorID: anchorID)
     }
 
     func pulseField() {
         strength = min(2.5, strength + 0.35)
         current = min(1.0, current + 0.2)
         animationSpeed = min(1.0, animationSpeed + 0.1)
+        applyMagnetPhysics(anchorID: selectedObjectID)
     }
 
     func deleteSelected() {
@@ -386,5 +433,145 @@ final class MagnetSimulatorStore: ObservableObject {
         }
 
         update(&objects[index])
+    }
+
+    private func applyMagnetPhysics(anchorID: UUID?) {
+        guard objects.count > 1 else {
+            return
+        }
+
+        for _ in 0..<3 {
+            resolveMagneticStep(anchorID: anchorID)
+        }
+    }
+
+    private func resolveMagneticStep(anchorID: UUID?) {
+        let sources = objects.filter { $0.kind.isFieldSource }
+        guard sources.isEmpty == false else {
+            return
+        }
+
+        for source in sources {
+            for targetIndex in objects.indices {
+                let target = objects[targetIndex]
+                guard target.id != source.id, target.id != anchorID, target.kind.isMagneticResponder else {
+                    continue
+                }
+
+                let dx = target.x - source.x
+                let dz = target.z - source.z
+                let distance = max(0.08, sqrt(dx * dx + dz * dz))
+                guard distance < 3.0 else {
+                    continue
+                }
+
+                let unitX = distance > 0.1 ? dx / distance : cos(source.yaw)
+                let unitZ = distance > 0.1 ? dz / distance : -sin(source.yaw)
+                let interaction = interactionBetween(source: source, target: target, unitX: unitX, unitZ: unitZ)
+                guard interaction.direction != 0.0 else {
+                    continue
+                }
+
+                let falloff = pow(max(0.0, (3.0 - distance) / 3.0), 1.65)
+                let sourcePower = max(0.15, source.kind.baseStrength * strength)
+                let isPoweredSource = source.kind == .solenoid || source.kind == .electromagnet
+                let currentBoost = isPoweredSource ? max(0.12, current) : 1.0
+                let movement = min(0.34, (0.035 + falloff * 0.32) * sourcePower * currentBoost * interaction.intensity)
+
+                objects[targetIndex].x = clampedX(target.x + unitX * movement * interaction.direction)
+                objects[targetIndex].z = clampedZ(target.z + unitZ * movement * interaction.direction)
+
+                let contactDistance = collisionRadius(for: source) + collisionRadius(for: target) + 0.04
+                if interaction.direction < 0.0, distance < contactDistance + 0.36 {
+                    snapObject(at: targetIndex, to: source, unitX: unitX, unitZ: unitZ, contactDistance: contactDistance)
+                } else if interaction.direction > 0.0, distance < contactDistance + 0.2 {
+                    objects[targetIndex].x = clampedX(source.x + unitX * (contactDistance + 0.22))
+                    objects[targetIndex].z = clampedZ(source.z + unitZ * (contactDistance + 0.22))
+                }
+            }
+        }
+    }
+
+    private func interactionBetween(
+        source: LabObject,
+        target: LabObject,
+        unitX: Double,
+        unitZ: Double
+    ) -> (direction: Double, intensity: Double) {
+        if target.kind.isFieldSource {
+            let sourcePole = magneticMoment(for: source).x * unitX + magneticMoment(for: source).z * unitZ
+            let targetPole = magneticMoment(for: target).x * -unitX + magneticMoment(for: target).z * -unitZ
+            let repels = sourcePole * targetPole > 0.0
+            return (repels ? 1.0 : -1.0, 1.0)
+        }
+
+        switch target.kind {
+        case .paperClip:
+            return (-1.0, 1.35)
+        case .steelBox:
+            return (-1.0, 1.05)
+        case .ferrofluid:
+            return (-1.0, 0.95)
+        case .magneticGel:
+            return (-1.0, 0.72)
+        case .compassNeedle:
+            return (-1.0, 0.62)
+        default:
+            return (0.0, 0.0)
+        }
+    }
+
+    private func snapObject(
+        at index: Int,
+        to source: LabObject,
+        unitX: Double,
+        unitZ: Double,
+        contactDistance: Double
+    ) {
+        objects[index].x = clampedX(source.x + unitX * contactDistance)
+        objects[index].z = clampedZ(source.z + unitZ * contactDistance)
+
+        if objects[index].kind.isFieldSource {
+            objects[index].yaw = source.yaw
+        } else {
+            objects[index].yaw = atan2(-unitZ, unitX)
+        }
+    }
+
+    private func magneticMoment(for object: LabObject) -> (x: Double, z: Double) {
+        (
+            x: cos(object.yaw) * object.polarity,
+            z: -sin(object.yaw) * object.polarity
+        )
+    }
+
+    private func collisionRadius(for object: LabObject) -> Double {
+        let baseRadius: Double
+        switch object.kind {
+        case .woodStick:
+            baseRadius = 0.68
+        case .fridgeSheet:
+            baseRadius = 0.78
+        case .horseshoe, .halbachArray:
+            baseRadius = 0.72
+        case .bar, .solenoid, .electromagnet, .neodymiumBlock, .ramp:
+            baseRadius = 0.64
+        case .paperClip:
+            baseRadius = 0.38
+        case .ferrofluid, .magneticGel:
+            baseRadius = 0.58
+        default:
+            baseRadius = 0.5
+        }
+
+        return baseRadius * object.scale
+    }
+
+    private func clampedX(_ x: Double) -> Double {
+        min(5.4, max(-5.4, x))
+    }
+
+    private func clampedZ(_ z: Double) -> Double {
+        min(3.6, max(-3.6, z))
     }
 }
