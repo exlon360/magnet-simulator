@@ -48,7 +48,7 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "circle.hexagongrid.circle.fill")
                     .font(.title2.weight(.black))
-                    .foregroundStyle(.magnetCyan)
+                    .foregroundStyle(Color.magnetCyan)
                     .frame(width: 42, height: 42)
                     .background(.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
