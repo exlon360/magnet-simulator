@@ -1,9 +1,11 @@
+import Combine
 import Foundation
 import SwiftUI
 
 struct ContentView: View {
     @StateObject private var store = MagnetSimulatorStore()
     @State private var advancedControlsOpen = false
+    private let physicsTimer = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -46,6 +48,9 @@ struct ContentView: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: advancedControlsOpen)
         .animation(.spring(response: 0.25, dampingFraction: 0.88), value: store.selectedObjectID)
         .animation(.spring(response: 0.25, dampingFraction: 0.88), value: store.objects)
+        .onReceive(physicsTimer) { _ in
+            store.tickPhysics()
+        }
     }
 
     private var topToolbar: some View {

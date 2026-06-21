@@ -93,7 +93,7 @@ struct MagnetSceneView: UIViewRepresentable {
                 if entity.kind == .magneticGel || entity.kind == .ferrofluid {
                     guard snapshot.showGel else { continue }
                 }
-                let node = makeNode(for: entity, snapshot: snapshot)
+                let node = makeNode(for: entity, snapshot: snapshot, fieldSources: fieldSources)
                 magnetsRoot.addChildNode(node)
             }
 
@@ -189,18 +189,24 @@ struct MagnetSceneView: UIViewRepresentable {
                     strength: Float(object.kind.baseStrength * snapshot.strength),
                     scale: Float(object.scale),
                     polarity: Float(object.polarity),
+                    rollX: Float(object.rollX),
+                    rollZ: Float(object.rollZ),
                     current: Float(snapshot.current),
                     isSelected: object.id == snapshot.selectedObjectID
                 )
             }
         }
 
-        private func makeNode(for entity: MagnetEntity, snapshot: MagnetSceneSnapshot) -> SCNNode {
+        private func makeNode(for entity: MagnetEntity, snapshot: MagnetSceneSnapshot, fieldSources: [MagnetEntity]) -> SCNNode {
             let node = SCNNode()
             node.name = entity.id.uuidString
             node.position = entity.position
             node.eulerAngles.y = entity.yaw
             node.scale = SCNVector3(entity.scale, entity.scale, entity.scale)
+            if entity.kind.isRollingBody {
+                node.eulerAngles.x = entity.rollX
+                node.eulerAngles.z = entity.rollZ
+            }
 
             switch entity.kind {
             case .bar:
@@ -228,9 +234,9 @@ struct MagnetSceneView: UIViewRepresentable {
             case .compassNeedle:
                 addCompassNeedle(to: node, yaw: 0.0, fieldStrength: entity.strength)
             case .ferrofluid:
-                addFerrofluid(to: node, snapshot: snapshot)
+                addFerrofluid(to: node, snapshot: snapshot, sources: fieldSources, entity: entity)
             case .magneticGel:
-                addMagneticGel(to: node, snapshot: snapshot)
+                addMagneticGel(to: node, snapshot: snapshot, sources: fieldSources, entity: entity)
             case .woodStick:
                 addWoodStick(to: node)
             case .woodBox:
@@ -587,7 +593,7 @@ struct MagnetSceneView: UIViewRepresentable {
             root.addChildNode(glow)
         }
 
-        private func addFerrofluid(to root: SCNNode, snapshot: MagnetSceneSnapshot) {
+        private func addFerrofluid(to root: SCNNode, snapshot: MagnetSceneSnapshot, sources: [MagnetEntity], entity: MagnetEntity) {
             let pool = cylinder(radius: 0.62, height: 0.07, color: UIColor(red: 0.02, green: 0.025, blue: 0.028, alpha: 0.95), metalness: 0.85, roughness: 0.18)
             pool.position.y = 0.035
             root.addChildNode(pool)
@@ -603,45 +609,116 @@ struct MagnetSceneView: UIViewRepresentable {
                 cone.radialSegmentCount = 18
                 cone.materials = [material(UIColor(red: 0.025, green: 0.03, blue: 0.035, alpha: 1.0), metalness: 0.9, roughness: 0.14)]
                 let spike = SCNNode(geometry: cone)
-                spike.position = SCNVector3(cosf(angle) * radius, 0.07 + height / 2.0, sinf(angle) * radius)
-                spike.eulerAngles.x = sinf(angle) * 0.12
-                spike.eulerAngles.z = cosf(angle) * -0.12
+                let localPosition = SCNVector3(cosf(angle) * radius, 0.07 + height / 2.0, sinf(angle) * radius)
+                spike.position = localPosition
+                let field = fieldVector(at: entity.position + localPosition, sources: sources)
+                let fieldLean = field.normalized() * min(0.46, field.length * 0.12)
+                orient(spike, along: SCNVector3(fieldLean.x + sinf(angle) * 0.08, 1.0, fieldLean.z + cosf(angle) * -0.08))
                 root.addChildNode(spike)
             }
         }
 
-        private func addMagneticGel(to root: SCNNode, snapshot: MagnetSceneSnapshot) {
+        private func addMagneticGel(to root: SCNNode, snapshot: MagnetSceneSnapshot, sources: [MagnetEntity], entity: MagnetEntity) {
             let viscosity = Float(snapshot.gelViscosity)
-            let stretch = 1.0 + Float(snapshot.strength) * (0.8 - viscosity * 0.45)
+            let nearest = nearestSource(to: entity, sources: sources)
+            let pull = nearest.map { max(0.0, min(1.0, (2.85 - $0.distance) / 2.85)) } ?? 0.0
+            let pullDirection = nearest?.relative.normalized() ?? SCNVector3(1.0, 0.0, 0.0)
+            let stretch = 1.0 + Float(snapshot.strength) * (0.8 - viscosity * 0.45) + pull * 0.55
+            let side = SCNVector3(-pullDirection.z, 0.0, pullDirection.x)
 
-            for index in 0..<13 {
-                let angle = Float(index) / 13.0 * Float.pi * 2.0
+            for index in 0..<16 {
+                let angle = Float(index) / 16.0 * Float.pi * 2.0
                 let radius = 0.12 + Float(index % 5) * 0.065
-                let gel = SCNSphere(radius: CGFloat(0.13 + Float(index % 3) * 0.018))
-                gel.segmentCount = 24
-                gel.materials = [
-                    material(
-                        UIColor(red: 0.25, green: 0.95, blue: 0.75, alpha: 0.44),
-                        metalness: 0.0,
-                        roughness: 0.18,
-                        alpha: 0.56,
-                        emission: UIColor(red: 0.02, green: 0.18, blue: 0.13, alpha: 1.0)
-                    )
-                ]
-
-                let blob = SCNNode(geometry: gel)
-                blob.position = SCNVector3(cosf(angle) * radius, 0.1 + Float(index % 4) * 0.055, sinf(angle) * radius * 0.75)
-                blob.scale = SCNVector3(stretch, 0.74 + viscosity * 0.36, 0.74)
-                blob.eulerAngles.y = angle * 0.35
+                let outward = SCNVector3(cosf(angle), 0.0, sinf(angle))
+                let beadPull = pull * (0.16 + Float(index % 4) * 0.07)
+                let blob = gelBlob(radius: CGFloat(0.13 + Float(index % 3) * 0.018), alpha: 0.56)
+                blob.position = outward * radius + pullDirection * beadPull + SCNVector3(0.0, 0.1 + Float(index % 4) * 0.055, 0.0)
+                blob.scale = SCNVector3(stretch + pull * 0.35, 0.74 + viscosity * 0.36, 0.74 + pull * 0.18)
+                blob.eulerAngles.y = atan2f(pullDirection.x + outward.x * 0.2, pullDirection.z + outward.z * 0.2)
                 root.addChildNode(blob)
+            }
+
+            if let nearest = nearest, pull > 0.05 {
+                addGelTendrils(to: root, nearest: nearest, direction: pullDirection, side: side, pull: pull, viscosity: viscosity)
+                addGelWrap(to: root, nearest: nearest, direction: pullDirection, side: side, pull: pull, viscosity: viscosity)
             }
 
             for index in 0..<9 {
                 let offset = -0.44 + Float(index) * 0.11
                 let bead = sphere(radius: 0.038, color: UIColor(red: 0.05, green: 0.08, blue: 0.09, alpha: 0.9))
-                bead.position = SCNVector3(offset, 0.28 + sinf(offset * 8.0) * 0.04, 0.16 * sinf(offset * 4.0))
+                bead.position = SCNVector3(offset, 0.28 + sinf(offset * 8.0) * 0.04, 0.16 * sinf(offset * 4.0)) + pullDirection * pull * 0.22 + side * (pull * sinf(offset * 7.0) * 0.08)
                 root.addChildNode(bead)
             }
+        }
+
+        private func addGelTendrils(
+            to root: SCNNode,
+            nearest: (source: MagnetEntity, relative: SCNVector3, distance: Float),
+            direction: SCNVector3,
+            side: SCNVector3,
+            pull: Float,
+            viscosity: Float
+        ) {
+            let strandCount = 5
+            let targetDistance = max(0.48, nearest.distance - 0.36 * nearest.source.scale)
+
+            for index in 0..<strandCount {
+                let lane = Float(index - 2) * 0.12
+                let start = side * lane + direction * 0.16 + SCNVector3(0.0, 0.16 + Float(index % 2) * 0.04, 0.0)
+                let end = direction * targetDistance + side * lane * (0.38 + pull * 0.35) + SCNVector3(0.0, 0.16 + pull * 0.18, 0.0)
+                let radius = CGFloat(0.014 + pull * 0.016 + (1.0 - viscosity) * 0.006)
+                root.addChildNode(tube(from: start, to: end, radius: radius, color: UIColor(red: 0.24, green: 0.95, blue: 0.74, alpha: 0.48)))
+            }
+        }
+
+        private func addGelWrap(
+            to root: SCNNode,
+            nearest: (source: MagnetEntity, relative: SCNVector3, distance: Float),
+            direction: SCNVector3,
+            side: SCNVector3,
+            pull: Float,
+            viscosity: Float
+        ) {
+            let center = direction * max(0.46, nearest.distance - 0.08 * nearest.source.scale) + SCNVector3(0.0, 0.13, 0.0)
+            let wrapRadius = 0.48 * nearest.source.scale + 0.12 + pull * 0.12
+
+            for band in 0..<3 {
+                var previousPoint: SCNVector3?
+                for step in 0..<10 {
+                    let arc = -1.22 + Float(step) * 0.27
+                    let bandOffset = Float(band - 1) * 0.09
+                    let point = center
+                        + side * (sinf(arc) * wrapRadius + bandOffset)
+                        + direction * (cosf(arc) * wrapRadius * 0.28 - wrapRadius * 0.18)
+                        + SCNVector3(0.0, abs(sinf(arc)) * 0.08 + Float(band) * 0.035, 0.0)
+
+                    let bead = gelBlob(radius: CGFloat(0.055 + pull * 0.03), alpha: CGFloat(0.42 + pull * 0.22))
+                    bead.position = point
+                    bead.scale = SCNVector3(1.2 + pull * 0.45, 0.72 + viscosity * 0.22, 0.84)
+                    bead.eulerAngles.y = atan2f(direction.x, direction.z)
+                    root.addChildNode(bead)
+
+                    if let previousPoint = previousPoint {
+                        root.addChildNode(tube(from: previousPoint, to: point, radius: CGFloat(0.012 + pull * 0.012), color: UIColor(red: 0.24, green: 0.95, blue: 0.74, alpha: 0.42)))
+                    }
+                    previousPoint = point
+                }
+            }
+        }
+
+        private func gelBlob(radius: CGFloat, alpha: CGFloat) -> SCNNode {
+            let gel = SCNSphere(radius: radius)
+            gel.segmentCount = 24
+            gel.materials = [
+                material(
+                    UIColor(red: 0.25, green: 0.95, blue: 0.75, alpha: alpha),
+                    metalness: 0.0,
+                    roughness: 0.18,
+                    alpha: alpha,
+                    emission: UIColor(red: 0.02, green: 0.18, blue: 0.13, alpha: 1.0)
+                )
+            ]
+            return SCNNode(geometry: gel)
         }
 
         private func addWoodStick(to root: SCNNode) {
@@ -904,6 +981,28 @@ struct MagnetSceneView: UIViewRepresentable {
             }
         }
 
+        private func nearestSource(
+            to entity: MagnetEntity,
+            sources: [MagnetEntity]
+        ) -> (source: MagnetEntity, relative: SCNVector3, distance: Float)? {
+            var nearest: (source: MagnetEntity, relative: SCNVector3, distance: Float)?
+
+            for source in sources where source.id != entity.id {
+                var relative = source.position - entity.position
+                relative.y = 0.0
+                let distance = relative.length
+                guard distance > 0.001 else {
+                    continue
+                }
+
+                if nearest == nil || distance < nearest!.distance {
+                    nearest = (source: source, relative: relative, distance: distance)
+                }
+            }
+
+            return nearest
+        }
+
         private func fieldVector(at point: SCNVector3, sources: [MagnetEntity]) -> SCNVector3 {
             var total = SCNVector3.zero
 
@@ -1077,6 +1176,8 @@ private struct MagnetEntity: Identifiable {
     let strength: Float
     var scale: Float = 1.0
     var polarity: Float = 1.0
+    var rollX: Float = 0.0
+    var rollZ: Float = 0.0
     var current: Float = 0.65
     var isSelected: Bool = false
 
