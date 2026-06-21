@@ -148,57 +148,18 @@ struct MagnetSceneView: UIViewRepresentable {
         }
 
         private func makeEntities(for snapshot: MagnetSceneSnapshot) -> [MagnetEntity] {
-            let strength = Float(snapshot.strength)
-            let polarity = Float(snapshot.polarity)
-            let current = Float(snapshot.current)
-
-            switch snapshot.scenario {
-            case .fullCatalog:
-                return [
-                    MagnetEntity(kind: .bar, position: SCNVector3(-4.2, 0.42, -2.35), yaw: 0.25, strength: 1.15 * strength, polarity: polarity),
-                    MagnetEntity(kind: .horseshoe, position: SCNVector3(-2.15, 0.52, -2.45), yaw: -0.25, strength: 1.05 * strength, polarity: polarity),
-                    MagnetEntity(kind: .ring, position: SCNVector3(0.0, 0.62, -2.35), yaw: 0.0, strength: 0.82 * strength, polarity: polarity),
-                    MagnetEntity(kind: .disk, position: SCNVector3(2.05, 0.42, -2.35), yaw: 0.35, strength: 0.75 * strength, polarity: polarity),
-                    MagnetEntity(kind: .cube, position: SCNVector3(4.0, 0.46, -2.3), yaw: -0.45, strength: 0.8 * strength, polarity: polarity),
-                    MagnetEntity(kind: .sphere, position: SCNVector3(-4.2, 0.5, -0.35), yaw: 0.4, strength: 0.68 * strength, polarity: polarity),
-                    MagnetEntity(kind: .neodymiumBlock, position: SCNVector3(-2.05, 0.46, -0.28), yaw: -0.1, strength: 1.55 * strength, polarity: polarity),
-                    MagnetEntity(kind: .solenoid, position: SCNVector3(0.0, 0.58, -0.25), yaw: 0.05, strength: strength, polarity: polarity, current: current),
-                    MagnetEntity(kind: .electromagnet, position: SCNVector3(2.15, 0.62, -0.22), yaw: -0.2, strength: 1.25 * strength, polarity: polarity, current: current),
-                    MagnetEntity(kind: .halbachArray, position: SCNVector3(4.08, 0.42, -0.25), yaw: 0.0, strength: 1.1 * strength, polarity: polarity),
-                    MagnetEntity(kind: .fridgeSheet, position: SCNVector3(-3.08, 0.2, 1.65), yaw: 0.18, strength: 0.48 * strength, polarity: polarity),
-                    MagnetEntity(kind: .compassNeedle, position: SCNVector3(-1.05, 0.18, 1.65), yaw: 0.35, strength: 0.25 * strength, polarity: polarity),
-                    MagnetEntity(kind: .ferrofluid, position: SCNVector3(1.25, 0.08, 1.68), yaw: 0.0, strength: 0.22 * strength, polarity: polarity),
-                    MagnetEntity(kind: .magneticGel, position: SCNVector3(3.3, 0.28, 1.62), yaw: -0.5, strength: 0.28 * strength, polarity: polarity),
-                    MagnetEntity(kind: snapshot.activeKind, position: SCNVector3(0.1, 1.18, 2.95), yaw: -0.42, strength: 1.45 * strength, scale: 1.22, polarity: polarity, current: current)
-                ]
-
-            case .gelLab:
-                return [
-                    MagnetEntity(kind: .neodymiumBlock, position: SCNVector3(-1.8, 0.45, 0.0), yaw: 0.0, strength: 1.7 * strength, polarity: polarity),
-                    MagnetEntity(kind: .ring, position: SCNVector3(1.7, 0.58, 0.05), yaw: 0.3, strength: 1.0 * strength, polarity: -polarity),
-                    MagnetEntity(kind: .magneticGel, position: SCNVector3(0.0, 0.28, 1.65), yaw: -0.15, strength: 0.4 * strength, scale: 1.45, polarity: polarity),
-                    MagnetEntity(kind: .ferrofluid, position: SCNVector3(0.0, 0.08, -1.55), yaw: 0.0, strength: 0.3 * strength, scale: 1.35, polarity: polarity)
-                ]
-
-            case .electromagnet:
-                return [
-                    MagnetEntity(kind: .electromagnet, position: SCNVector3(-1.35, 0.65, 0.0), yaw: 0.0, strength: 1.55 * strength, scale: 1.25, polarity: polarity, current: current),
-                    MagnetEntity(kind: .solenoid, position: SCNVector3(1.75, 0.6, 0.0), yaw: 0.05, strength: 1.25 * strength, scale: 1.2, polarity: -polarity, current: current),
-                    MagnetEntity(kind: .compassNeedle, position: SCNVector3(0.15, 0.18, 2.0), yaw: 0.0, strength: 0.2 * strength, polarity: polarity)
-                ]
-
-            case .halbach:
-                return [
-                    MagnetEntity(kind: .halbachArray, position: SCNVector3(0.0, 0.45, -0.5), yaw: 0.0, strength: 1.7 * strength, scale: 1.45, polarity: polarity),
-                    MagnetEntity(kind: .fridgeSheet, position: SCNVector3(-2.9, 0.18, 1.55), yaw: 0.0, strength: 0.55 * strength, polarity: polarity),
-                    MagnetEntity(kind: .bar, position: SCNVector3(2.8, 0.42, 1.55), yaw: 0.0, strength: 0.85 * strength, polarity: -polarity)
-                ]
-
-            case .compassRoom:
-                return [
-                    MagnetEntity(kind: .bar, position: SCNVector3(-1.4, 0.45, -0.65), yaw: 0.55, strength: 1.45 * strength, scale: 1.25, polarity: polarity),
-                    MagnetEntity(kind: .horseshoe, position: SCNVector3(1.65, 0.5, 0.75), yaw: -0.35, strength: 1.05 * strength, scale: 1.15, polarity: -polarity)
-                ]
+            snapshot.objects.map { object in
+                MagnetEntity(
+                    id: object.id,
+                    kind: object.kind,
+                    position: SCNVector3(Float(object.x), verticalOffset(for: object.kind), Float(object.z)),
+                    yaw: Float(object.yaw),
+                    strength: Float(object.kind.baseStrength * snapshot.strength),
+                    scale: Float(object.scale),
+                    polarity: Float(object.polarity),
+                    current: Float(snapshot.current),
+                    isSelected: object.id == snapshot.selectedObjectID
+                )
             }
         }
 
@@ -238,10 +199,26 @@ struct MagnetSceneView: UIViewRepresentable {
                 addFerrofluid(to: node, snapshot: snapshot)
             case .magneticGel:
                 addMagneticGel(to: node, snapshot: snapshot)
+            case .woodStick:
+                addWoodStick(to: node)
+            case .woodBox:
+                addWoodBox(to: node)
+            case .steelBox:
+                addSteelBox(to: node)
+            case .plasticBall:
+                addPlasticBall(to: node)
+            case .ramp:
+                addRamp(to: node)
+            case .paperClip:
+                addPaperClip(to: node)
             }
 
-            if snapshot.isPaused == false && snapshot.animationSpeed > 0.01 {
-                applyMotion(to: node, kind: entity.kind, speed: Float(snapshot.animationSpeed))
+            if entity.isSelected {
+                addSelectionHalo(to: node, kind: entity.kind)
+            }
+
+            if snapshot.isPaused == false {
+                applyMotion(to: node, entity: entity, snapshot: snapshot)
             }
 
             return node
@@ -523,9 +500,133 @@ struct MagnetSceneView: UIViewRepresentable {
             }
         }
 
-        private func applyMotion(to node: SCNNode, kind: MagnetKind, speed: Float) {
+        private func addWoodStick(to root: SCNNode) {
+            let stick = box(width: 1.28, height: 0.16, length: 0.16, color: UIColor(red: 0.78, green: 0.43, blue: 0.18, alpha: 1.0), roughness: 0.56, chamfer: 0.04)
+            root.addChildNode(stick)
+
+            for index in -2...2 {
+                let stripe = box(width: 0.018, height: 0.17, length: 0.17, color: UIColor(red: 0.54, green: 0.29, blue: 0.13, alpha: 0.55), roughness: 0.6, chamfer: 0.004)
+                stripe.position.x = Float(index) * 0.22
+                root.addChildNode(stripe)
+            }
+        }
+
+        private func addWoodBox(to root: SCNNode) {
+            let boxNode = box(width: 0.78, height: 0.58, length: 0.78, color: UIColor(red: 0.72, green: 0.42, blue: 0.19, alpha: 1.0), roughness: 0.58, chamfer: 0.045)
+            root.addChildNode(boxNode)
+
+            let lid = box(width: 0.84, height: 0.04, length: 0.84, color: UIColor(red: 0.9, green: 0.6, blue: 0.29, alpha: 1.0), roughness: 0.48, chamfer: 0.02)
+            lid.position.y = 0.31
+            root.addChildNode(lid)
+        }
+
+        private func addSteelBox(to root: SCNNode) {
+            let crate = box(width: 0.8, height: 0.58, length: 0.8, color: UIColor(red: 0.62, green: 0.69, blue: 0.76, alpha: 1.0), metalness: 0.72, roughness: 0.22, chamfer: 0.045)
+            root.addChildNode(crate)
+
+            let face = box(width: 0.54, height: 0.03, length: 0.54, color: UIColor.white.withAlphaComponent(0.22), metalness: 0.5, roughness: 0.18, chamfer: 0.02)
+            face.position = SCNVector3(0.0, 0.08, 0.415)
+            face.eulerAngles.x = Float.pi / 2.0
+            root.addChildNode(face)
+        }
+
+        private func addPlasticBall(to root: SCNNode) {
+            let ball = SCNSphere(radius: 0.42)
+            ball.segmentCount = 42
+            ball.materials = [
+                material(UIColor(red: 0.58, green: 0.96, blue: 0.26, alpha: 1.0), metalness: 0.0, roughness: 0.22, emission: UIColor(red: 0.04, green: 0.13, blue: 0.0, alpha: 1.0))
+            ]
+            root.addChildNode(SCNNode(geometry: ball))
+
+            let band = SCNTorus(ringRadius: 0.42, pipeRadius: 0.018)
+            band.materials = [material(UIColor.white.withAlphaComponent(0.36), roughness: 0.18, alpha: 0.36)]
+            let bandNode = SCNNode(geometry: band)
+            bandNode.eulerAngles.x = Float.pi / 2.0
+            root.addChildNode(bandNode)
+        }
+
+        private func addRamp(to root: SCNNode) {
+            let indices: [Int32] = [
+                0, 1, 2, 1, 3, 2,
+                2, 3, 4, 3, 5, 4,
+                0, 2, 4, 0, 4, 1,
+                1, 4, 5, 1, 5, 3,
+                0, 1, 3, 0, 3, 2
+            ]
+            let geometry = SCNGeometry(
+                sources: [
+                    SCNGeometrySource(vertices: [
+                        SCNVector3(-0.7, -0.26, -0.42),
+                        SCNVector3(0.7, -0.26, -0.42),
+                        SCNVector3(-0.7, -0.26, 0.42),
+                        SCNVector3(0.7, -0.26, 0.42),
+                        SCNVector3(-0.7, 0.32, 0.42),
+                        SCNVector3(0.7, 0.32, 0.42)
+                    ])
+                ],
+                elements: [
+                    SCNGeometryElement(indices: indices, primitiveType: .triangles)
+                ]
+            )
+            geometry.materials = [material(UIColor(red: 0.78, green: 0.48, blue: 0.22, alpha: 1.0), roughness: 0.5)]
+            root.addChildNode(SCNNode(geometry: geometry))
+        }
+
+        private func addPaperClip(to root: SCNNode) {
+            let outer = SCNTorus(ringRadius: 0.34, pipeRadius: 0.026)
+            outer.materials = [material(UIColor(red: 0.82, green: 0.87, blue: 0.9, alpha: 1.0), metalness: 0.75, roughness: 0.2)]
+            let outerNode = SCNNode(geometry: outer)
+            outerNode.scale.z = 0.45
+            outerNode.eulerAngles.x = Float.pi / 2.0
+            root.addChildNode(outerNode)
+
+            let inner = SCNTorus(ringRadius: 0.2, pipeRadius: 0.021)
+            inner.materials = outer.materials
+            let innerNode = SCNNode(geometry: inner)
+            innerNode.position.x = 0.08
+            innerNode.scale.z = 0.42
+            innerNode.eulerAngles.x = Float.pi / 2.0
+            root.addChildNode(innerNode)
+        }
+
+        private func addSelectionHalo(to root: SCNNode, kind: MagnetKind) {
+            let color = selectionColor(for: kind)
+            let torus = SCNTorus(ringRadius: 0.72, pipeRadius: 0.018)
+            torus.materials = [material(color, roughness: 0.18, alpha: 0.76, emission: color.withAlphaComponent(0.3))]
+            let halo = SCNNode(geometry: torus)
+            halo.position.y = -verticalOffset(for: kind) + 0.035
+            halo.eulerAngles.x = Float.pi / 2.0
+            root.addChildNode(halo)
+        }
+
+        private func applyMotion(to node: SCNNode, entity: MagnetEntity, snapshot: MagnetSceneSnapshot) {
+            let speed = Float(snapshot.animationSpeed)
+            guard speed > 0.01 else { return }
+
             let duration = Double(max(0.35, 4.0 - speed * 3.0))
-            switch kind {
+
+            if entity.isSelected {
+                switch snapshot.motionMode {
+                case .still:
+                    break
+                case .wiggle:
+                    node.runAction(.repeatForever(.sequence([
+                        .rotateBy(x: 0.0, y: CGFloat(0.28 + speed * 0.18), z: 0.0, duration: duration * 0.22),
+                        .rotateBy(x: 0.0, y: CGFloat(-0.56 - speed * 0.36), z: 0.0, duration: duration * 0.44),
+                        .rotateBy(x: 0.0, y: CGFloat(0.28 + speed * 0.18), z: 0.0, duration: duration * 0.22)
+                    ])))
+                case .spin:
+                    node.runAction(.repeatForever(.rotateBy(x: 0.0, y: CGFloat(1.0 + speed * 2.1), z: 0.0, duration: duration)))
+                case .float:
+                    node.runAction(.repeatForever(.sequence([
+                        .moveBy(x: 0.0, y: CGFloat(0.18 * speed), z: 0.0, duration: duration * 0.36),
+                        .moveBy(x: 0.0, y: CGFloat(-0.18 * speed), z: 0.0, duration: duration * 0.36)
+                    ])))
+                }
+                return
+            }
+
+            switch entity.kind {
             case .ring, .disk, .solenoid, .electromagnet:
                 node.runAction(.repeatForever(.rotateBy(x: 0.0, y: CGFloat(0.55 + speed), z: 0.0, duration: duration)))
             case .magneticGel, .ferrofluid:
@@ -538,6 +639,38 @@ struct MagnetSceneView: UIViewRepresentable {
             }
         }
 
+        private func verticalOffset(for kind: MagnetKind) -> Float {
+            switch kind {
+            case .fridgeSheet:
+                return 0.16
+            case .compassNeedle:
+                return 0.12
+            case .ferrofluid:
+                return 0.06
+            case .magneticGel:
+                return 0.22
+            case .plasticBall:
+                return 0.42
+            case .woodStick:
+                return 0.16
+            case .woodBox, .steelBox, .ramp:
+                return 0.3
+            case .paperClip:
+                return 0.05
+            default:
+                return 0.45
+            }
+        }
+
+        private func selectionColor(for kind: MagnetKind) -> UIColor {
+            switch kind.category {
+            case .magnets:
+                return UIColor(red: 0.32, green: 0.88, blue: 1.0, alpha: 0.76)
+            case .objects:
+                return UIColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 0.76)
+            }
+        }
+
         private func addFieldLines(for sources: [MagnetEntity], snapshot: MagnetSceneSnapshot) {
             guard sources.isEmpty == false else { return }
 
@@ -546,7 +679,7 @@ struct MagnetSceneView: UIViewRepresentable {
             scene.rootNode.addChildNode(root)
 
             let density = max(5, 8 + Int(snapshot.fieldDensity * 18.0))
-            let usableSources = Array(sources.prefix(snapshot.scenario == .fullCatalog ? 7 : sources.count))
+            let usableSources = Array(sources.prefix(max(1, min(8, sources.count))))
 
             for source in usableSources {
                 let direction = source.moment.normalized()
@@ -560,7 +693,7 @@ struct MagnetSceneView: UIViewRepresentable {
                     let angle = Float(index) / Float(rings) * Float.pi * 2.0
                     let radius = 0.18 + Float(index % 4) * 0.075
                     let seed = origin + basis.side * (cosf(angle) * radius) + basis.up * (sinf(angle) * radius + 0.18)
-                    traceFieldLine(from: seed, sources: sources, root: root, polarity: Float(snapshot.polarity))
+                    traceFieldLine(from: seed, sources: sources, root: root, polarity: source.polarity)
                 }
             }
         }
@@ -793,7 +926,7 @@ struct MagnetSceneView: UIViewRepresentable {
 }
 
 private struct MagnetEntity: Identifiable {
-    let id = UUID()
+    let id: UUID
     let kind: MagnetKind
     let position: SCNVector3
     let yaw: Float
@@ -801,14 +934,10 @@ private struct MagnetEntity: Identifiable {
     var scale: Float = 1.0
     var polarity: Float = 1.0
     var current: Float = 0.65
+    var isSelected: Bool = false
 
     var contributesToField: Bool {
-        switch kind {
-        case .compassNeedle, .ferrofluid, .magneticGel:
-            return false
-        default:
-            return true
-        }
+        kind.isFieldSource
     }
 
     var moment: SCNVector3 {
